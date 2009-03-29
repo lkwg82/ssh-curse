@@ -47,8 +47,10 @@ my $ssh_config = &read_ssh_config;
 
 use Curses;
 use Curses::UI;
+use Term::ANSIColor;
 
-my $cui = Curses::UI->new();
+my $cui = Curses::UI->new( -color_support => 1,
+                           -clear_on_exit => 0 );
 
 #-color_support,-clear_on_exit,-mouse_support
 #);
@@ -102,16 +104,16 @@ $cui->set_binding( sub { \&exit_dialog(); }, 'q' );
 
 my $label = $win_info->add(
                             'mylabel', 'Label',
-                            -text => 'quit: q',
+                            -text => 'quit: q   connect: ENTER',
                             -bold => 0,
                             )->draw();
 
-my $label2 = $win_info->add(
-                             'mylabel1', 'Label',
-                             -text => 'Hello, world!\nds',
-                             -bold => 0,
-                             -x    => 30
-                             )->draw();
+#~ my $label2 = $win_info->add(
+#~ 'mylabel1', 'Label',
+#~ -text => 'Hello, world!\nds',
+#~ -bold => 0,
+#~ -x    => 30
+#~ )->draw();
 
 my @values = sort { lc $a cmp lc $b } ( keys %{$ssh_config} );
 
@@ -132,132 +134,27 @@ sub ssh_connect
 
     my $key = $listbox->get_active_value();
 
-    my $cmdline = &ssh_get_connection_info( $config, $key );
     $cui->leave_curses();
 
-    print "executing ssh : $cmdline \n";
-    system($cmdline);
+    my $cmdline = "ssh $key";
+    print colored ( "executing ssh : $cmdline", 'bold on_white' ), "\n";
+
+    my $e = system($cmdline);
+
+    $e /= 256;
+
+    if ( $e == 255 )
+    {
+
+        #~ print colored ("exit code = $e",'bold red'),"\n";
+        print colored ( "--- error occurred - see message above --- ", 'bold red on_black' ), "\n";
+        print colored ( "- press ENTER to continue ---", 'green on_white' );
+        <STDIN>;
+    }
 
 }
 
-sub ssh_get_connection_info
-{
-    my ( $config, $key ) = @_;
-
-    if ( exists $config->{$key} )
-    {
-        my $entry   = $config->{$key};
-        my $cmdline = 'ssh ';
-
-        my $getValue = sub {
-            my ( $key, $lowercase, $defaultkey ) = @_;
-
-            if ( defined($lowercase) ? $lowercase : 1 )
-            {
-                $key = lc $key;
-                $defaultkey = defined $defaultkey ? lc $defaultkey : undef;
-            }
-
-            if ( exists $entry->{$key} )
-            {
-                return $entry->{$key};
-            }
-            elsif ( defined $defaultkey && exists $entry->{$defaultkey} )
-            {
-                return $entry->{$defaultkey};
-            }
-            else
-            {
-                return undef;
-            }
-        };
-
-        my $appendStr = sub {
-            my ( $key, $prefix, $lowercase, $defaultkey, $sub_ref ) = @_;
-
-            my $value = $getValue->( $key, $lowercase, $defaultkey );
-
-            if ( defined $defaultkey && !defined $value )
-            {
-                warn "value should not be null \n";
-            }
-
-            if ( defined $value )
-            {
-                if ( ref $value ne 'ARRAY' )
-                {
-                    $value = [$value];
-                }
-
-                if ( defined $sub_ref && ref $sub_ref eq 'CODE' )
-                {
-                    map { $_ = $sub_ref->($_); } @{$value};
-                }
-
-                if ( defined $prefix )
-                {
-                    my $result;
-                    grep { $result .= ' ' . $prefix . ' ' . $_; } @{$value};
-                    return ' ' . $result;
-                }
-            }
-
-            return '';
-        };
-
-        my $appendFlag = sub {
-            my ( $key, $trueValue, $caseinsensitive, $flag_on_true ) = @_;
-
-            my $value = $getValue->( $key, 1 );
-
-            if ( ref $trueValue ne 'ARRAY' )
-            {
-                $trueValue = [$trueValue];
-            }
-
-            if ( defined $value )
-            {
-                for my $val ( @{$trueValue} )
-                {
-                    if ($caseinsensitive)
-                    {
-                        return $flag_on_true if ( $val =~ /^$value$/i );
-                    }
-                    else
-                    {
-                        return $flag_on_true if ( $val =~ /^$value$/ );
-                    }
-                }
-            }
-
-            return '';
-        };
-
-        my $prepareForwards = sub {
-            local $_ = shift;
-            s/[\ \t]+/:/;
-            return $_;
-        };
-
-        $cmdline .= $appendFlag->( 'Compression', 'Yes', 1, '-C' );
-        $cmdline .= $appendStr->( 'user',          '-l', 1 );
-        $cmdline .= $appendStr->( 'identityfile',  '-i', 1 );
-        $cmdline .= $appendStr->( 'port',          '-p', 1 );
-        $cmdline .= $appendStr->( 'localforward',  '-L', 1, undef, $prepareForwards );
-        $cmdline .= $appendStr->( 'remoteforward', '-R', 1, undef, $prepareForwards );
-        $cmdline .= $appendStr->( 'Hostname', '', 1, 'Host' );
-
-        $cmdline =~ s/([\ ])+/$1/g;
-        return $cmdline;
-    }
-    else
-    {
-        return '';
-    }
-}
-
-#&dump($listbox);
-
+# debugging function
 sub dump
 {
     use XML::Dumper;
@@ -318,8 +215,10 @@ sub display_ssh_config
     # $value_key    - the config-key
     # $default_value- if the config-key not exists display this instead [optional]
     my $subFillLabels = sub {
-        my ( $key_, $_offSet, $value_key, $default_value ) = @_;
+        my ( $key_, $_offSet, $list_already_onscreen, $value_key, $default_value ) = @_;
+
         $value_key = lc $value_key;
+        $list_already_onscreen->{$value_key} = 1;
 
         my ( $label_key, $label_val ) = ( 'label_k_' . $value_key, 'label_v_' . $value_key );
         my $x_offset = 20;
@@ -371,18 +270,27 @@ sub display_ssh_config
 
     };
 
-    $cui->leave_curses();
-    $subFillLabels->( ( $key, $offSet ), ( 'Hostname', $key ) );
-    $subFillLabels->( ( $key, $offSet ), ('User') );
-    $subFillLabels->( ( $key, $offSet ), ('Port') );
-    $subFillLabels->( ( $key, $offSet ), ('IdentityFile') );
-    $subFillLabels->( ( $key, $offSet ), ('Compression') );
-    $subFillLabels->( ( $key, $offSet ), ('LocalForward') );
-    $subFillLabels->( ( $key, $offSet ), ('RemoteForward') );
+    my $list_already_onscreen = { 'host' => 1 };
 
-    #$cui->destroy();
+    $subFillLabels->( ( $key, $offSet, $list_already_onscreen ), ( 'Hostname', $key ) );
+    $subFillLabels->( ( $key, $offSet, $list_already_onscreen ), ('User') );
+    $subFillLabels->( ( $key, $offSet, $list_already_onscreen ), ('Port') );
+    $subFillLabels->( ( $key, $offSet, $list_already_onscreen ), ('IdentityFile') );
+    $subFillLabels->( ( $key, $offSet, $list_already_onscreen ), ('Compression') );
+    $subFillLabels->( ( $key, $offSet, $list_already_onscreen ), ('LocalForward') );
+    $subFillLabels->( ( $key, $offSet, $list_already_onscreen ), ('RemoteForward') );
 
-    #print Dumper({$key=>$config->{$key}});
+    #~ $cui->leave_curses();
+
+    grep {
+        if ( !( exists $list_already_onscreen->{$_} ) )
+        {
+            $subFillLabels->( ( $key, $offSet, $list_already_onscreen ), ($_) );
+        }
+
+    } sort keys %{ $config->{$key} };
+
+    #~ <STDIN>;
 
     return;
 }
