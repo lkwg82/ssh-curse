@@ -43,7 +43,6 @@ use Data::Dumper;
 use autodie qw< :io >;
 use English qw(-no_match_vars);
 $OUTPUT_AUTOFLUSH = 1;
-my $ssh_config = &read_ssh_config;
 
 use Curses;
 use Curses::UI;
@@ -51,6 +50,9 @@ use Term::ANSIColor;
 
 my $cui = Curses::UI->new( -color_support => 1,
                            -clear_on_exit => 0 );
+
+
+my $ssh_config = &read_ssh_config;
 
 #-color_support,-clear_on_exit,-mouse_support
 #);
@@ -378,19 +380,33 @@ sub read_ssh_config
         }
     };
 
-    my $error_on_open = open my $fh, q{<}, '/home/' . $user . '/.ssh/config';
-    if ( !$error_on_open )
+    my $ssh_config_file = '/home/' . $user . '/.ssh/config';
+    if ( -e $ssh_config_file )
     {
-        die $EXTENDED_OS_ERROR;
-    }
-    else
-    {
-        $process_ssh_config->( $fh, \%config );
-        my $error_on_close = close $fh;
-        if ( !$error_on_close )
+        my $error_on_open = open my $fh, q{<}, $ssh_config_file;
+        if ( !$error_on_open )
         {
             die $EXTENDED_OS_ERROR;
         }
+        else
+        {
+            $process_ssh_config->( $fh, \%config );
+            my $error_on_close = close $fh;
+            if ( !$error_on_close )
+            {
+                die $EXTENDED_OS_ERROR;
+            }
+        }
+    }
+    else
+    {
+        $cui->error(
+            -message => 'please create a ssh config file : '.$ssh_config_file,
+            -title   => 'config missing',
+            -buttons => [ 'ok' ],
+            -border  => 1,
+            );
+        exit 1;
     }
 
     #~ &dump( \%config );
