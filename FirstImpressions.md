@@ -1,0 +1,3 @@
+<img src='http://ssh-curse.googlecode.com/svn/trunk/screens/screen_20090328.png' width='50%' />
+
+This is the first screenshot
